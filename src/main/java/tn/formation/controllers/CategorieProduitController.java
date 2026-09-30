@@ -13,12 +13,12 @@ import java.util.List;
 @RequestMapping("/categorieProduit")
 public class CategorieProduitController {
 
-    @Autowired
+
     ICategorieProduitService categorieProduitService;
 
-    // http://localhost:8089/SpringMVC/categorieProduit/retrieve-all-categorieProduit
+
     @GetMapping("/retrieve-all-categorieProduit")
-    @ResponseBody
+
     public List<CategorieProduit> getCategorieProduit() {
         List<CategorieProduit> list = categorieProduitService.retrieveAllCategorieProduits();
         return list;
