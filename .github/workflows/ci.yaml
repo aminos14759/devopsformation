@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # ---------- 1. Build, tests, scan des dépendances ----------
+  build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -28,9 +28,122 @@ jobs:
       - name: Build and test with Maven
         run: mvn -B package --file pom.xml
 
-      - name: Upload test reports
+      - name: Upload test and coverage reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports
-          path: target/surefire-reports/
+          name: reports
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Trivy FS scan
+        run: |
+          trivy fs \
+            --scanners vuln \
+            --skip-dirs target \
+            --timeout 30m \
+            --output trivy-fs-report.txt \
+            .
+          # Pour bloquer le pipeline : ajouter --severity HIGH,CRITICAL --exit-code 1
+
+      - name: Upload Trivy FS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-report
+          path: trivy-fs-report.txt
+
+  # ---------- 2. SonarQube + Nexus (sur la VM) ----------
+  sonar-nexus:
+    needs: build-test
+    if: github.event_name == 'push'
+    runs-on: self-hosted
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 and Nexus credentials
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+          server-id: deploymentRepo
+          server-username: NEXUS_USERNAME
+          server-password: NEXUS_PASSWORD
+
+      - name: Tests + SonarQube analysis
+        run: |
+          mvn -B verify sonar:sonar \
+            -Dsonar.projectKey=devopsbackend \
+            -Dsonar.host.url=http://192.168.33.10:9000/ \
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+
+      - name: Deploy to Nexus
+        run: |
+          mvn -B deploy -DskipTests \
+            -DaltDeploymentRepository=deploymentRepo::default::http://192.168.33.10/:8081/repository/maven-releases/
+        env:
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+
+  # ---------- 3. Docker : build, scan, push ----------
+  docker:
+    needs: build-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker build
+        run: docker build -t formation-backend:latest .
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Trivy image scan
+        run: |
+          trivy image \
+            --scanners vuln \
+            --timeout 30m \
+            --output trivy-image-report.txt \
+            formation-backend:latest
+
+      - name: Upload Trivy image report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report
+          path: trivy-image-report.txt
+
+      - name: Docker Hub login and push
+        env:
+          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+          docker tag formation-backend:latest $DOCKER_USER/formation-backend:latest
+          docker push $DOCKER_USER/formation-backend:latest
+          docker logout
