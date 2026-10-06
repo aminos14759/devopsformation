@@ -37,7 +37,7 @@ jobs:
             target/surefire-reports/
             target/site/jacoco/
 
-  # ---------- 2. SonarQube + Nexus (sur la VM) ----------
+  # ---------- 2. SonarQube + Nexus (self-hosted runner sur la VM) ----------
   sonar-nexus:
     needs: build-test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -49,15 +49,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 and Nexus credentials
+      # overwrite-settings: false -> on garde le ~/.m2/settings.xml de la VM
+      # (qui contient les identifiants Nexus pour l'id deploymentRepo)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
-          server-id: deploymentRepo
-          server-username: NEXUS_USERNAME
-          server-password: NEXUS_PASSWORD
+          overwrite-settings: false
 
       - name: Tests + SonarQube analysis
         run: |
@@ -71,9 +71,6 @@ jobs:
         run: |
           mvn -B deploy -DskipTests \
             -DaltDeploymentRepository=deploymentRepo::default::http://192.168.33.10:8081/repository/maven-releases/
-        env:
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
 
   # ---------- 3. Trivy + Docker : scans, build, push ----------
   docker:
@@ -86,6 +83,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # Remplit ~/.m2 pour que Trivy ne retélécharge pas les POM (évite le 429)
+      - name: Resolve Maven dependencies
+        run: mvn -B dependency:resolve
 
       - name: Install Trivy
         run: |
