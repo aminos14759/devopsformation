@@ -29,6 +29,6 @@ scrape_configs:
       - targets: ['172.17.0.1:8787']
 
   - job_name: 'backend'
-    metrics_path: 'SpringMVC/actuator/prometheus'
+    metrics_path: '/SpringMVC/actuator/prometheus'
     static_configs:
       - targets: ['192.168.33.10:8282']
