@@ -1,10 +1,12 @@
+
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
   namespace: devops
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes:
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
@@ -40,7 +42,10 @@ spec:
               subPath: pgdata
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres", "-d", "devopsdb"]
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d devopsdb
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
