@@ -1,3 +1,4 @@
+
 ---
 - name: Deploy Spring Boot Backend on Minikube
   hosts: minikube
@@ -5,9 +6,11 @@
 
   tasks:
 
+    # 1. Vérifier la connexion SSH
     - name: Check SSH connection
       ping:
 
+    # 2. Vérifier Minikube
     - name: Check Minikube status
       command: minikube status
       register: minikube_status
@@ -17,20 +20,26 @@
       debug:
         var: minikube_status.stdout_lines
 
+    # 3. Créer le dossier du projet
     - name: Create project directory
       file:
         path: /home/vagrant/devopsformation/k8s
         state: directory
         mode: '0755'
 
+    # 4. Copier les manifests Kubernetes
     - name: Copy Kubernetes manifests
       copy:
         src: "{{ playbook_dir }}/../../k8s/"
-        dest: /opt/devopsformation/k8s/
+        dest: /home/vagrant/devopsformation/k8s/
 
+    # 5. Créer le namespace
     - name: Create namespace
-      command: kubectl apply -f /opt/devopsformation/k8s/namespace.yaml
+      command: >
+        kubectl apply
+        -f /home/vagrant/devopsformation/k8s/namespace.yaml
 
+    # 6. Créer le secret PostgreSQL
     - name: Create PostgreSQL secret
       shell: |
         kubectl create secret generic db-secret \
@@ -39,31 +48,42 @@
           --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
           --dry-run=client -o yaml | kubectl apply -f -
       environment:
-        POSTGRES_USER: "{{ lookup('env', 'POSTGRES_USER') }}"
-        POSTGRES_PASSWORD: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+        POSTGRES_USER: "{{ postgres_user }}"
+        POSTGRES_PASSWORD: "{{ postgres_password }}"
       no_log: true
 
+    # 7. Déployer PostgreSQL
     - name: Deploy PostgreSQL
-      command: kubectl apply -f /opt/devopsformation/k8s/postgres.yaml
+      command: >
+        kubectl apply
+        -f /home/vagrant/devopsformation/k8s/postgres.yaml
 
+    # 8. Attendre que PostgreSQL soit prêt
     - name: Wait for PostgreSQL
-      command: kubectl rollout status deployment/postgres -n devops --timeout=180s
+      command: >
+        kubectl rollout status deployment/postgres
+        -n devops --timeout=180s
+      changed_when: false
 
-    - name: Configure backend image
-      replace:
-        path: /opt/devopsformation/k8s/backend.yaml
-        regexp: '__BACKEND_IMAGE__'
-        replace: "{{ lookup('env', 'DOCKER_IMAGE') }}"
-
+    # 9. Déployer le backend avec la nouvelle image
     - name: Deploy backend
-      command: kubectl apply -f /opt/devopsformation/k8s/backend.yaml
+      command: >
+        kubectl set image deployment/backend
+        backend={{ backend_image }}
+        -n devops
 
+    # 10. Attendre le déploiement du backend
     - name: Wait for backend deployment
-      command: kubectl rollout status deployment/backend -n devops --timeout=180s
+      command: >
+        kubectl rollout status deployment/backend
+        -n devops --timeout=180s
+      changed_when: false
 
+    # 11. Afficher les ressources Kubernetes
     - name: Display Kubernetes resources
       command: kubectl get pods,services -n devops
       register: resources
+      changed_when: false
 
     - name: Deployment result
       debug:
