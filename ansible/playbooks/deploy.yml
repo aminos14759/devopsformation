@@ -19,8 +19,9 @@
 
     - name: Create project directory
       file:
-        path: /opt/devopsformation/k8s
+        path: /home/vagrant/devopsformation/k8s
         state: directory
+        mode: '0755'
 
     - name: Copy Kubernetes manifests
       copy:
