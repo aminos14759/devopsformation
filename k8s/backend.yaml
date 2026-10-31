@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: <DOCKER_USER>/formation-backend:latest
+          image: medamine56987/formation-backend
           imagePullPolicy: Always
           ports:
             - containerPort: 8282

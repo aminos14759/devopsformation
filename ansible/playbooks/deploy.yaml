@@ -1,0 +1,69 @@
+---
+- name: Deploy Spring Boot Backend on Minikube
+  hosts: minikube
+  become: false
+
+  tasks:
+
+    - name: Check SSH connection
+      ping:
+
+    - name: Check Minikube status
+      command: minikube status
+      register: minikube_status
+      changed_when: false
+
+    - name: Display Minikube status
+      debug:
+        var: minikube_status.stdout_lines
+
+    - name: Create project directory
+      file:
+        path: /opt/devopsformation/k8s
+        state: directory
+
+    - name: Copy Kubernetes manifests
+      copy:
+        src: "{{ playbook_dir }}/../../k8s/"
+        dest: /opt/devopsformation/k8s/
+
+    - name: Create namespace
+      command: kubectl apply -f /opt/devopsformation/k8s/namespace.yaml
+
+    - name: Create PostgreSQL secret
+      shell: |
+        kubectl create secret generic db-secret \
+          --namespace=devops \
+          --from-literal=POSTGRES_USER="$POSTGRES_USER" \
+          --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
+      environment:
+        POSTGRES_USER: "{{ lookup('env', 'POSTGRES_USER') }}"
+        POSTGRES_PASSWORD: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+      no_log: true
+
+    - name: Deploy PostgreSQL
+      command: kubectl apply -f /opt/devopsformation/k8s/postgres.yaml
+
+    - name: Wait for PostgreSQL
+      command: kubectl rollout status deployment/postgres -n devops --timeout=180s
+
+    - name: Configure backend image
+      replace:
+        path: /opt/devopsformation/k8s/backend.yaml
+        regexp: '__BACKEND_IMAGE__'
+        replace: "{{ lookup('env', 'DOCKER_IMAGE') }}"
+
+    - name: Deploy backend
+      command: kubectl apply -f /opt/devopsformation/k8s/backend.yaml
+
+    - name: Wait for backend deployment
+      command: kubectl rollout status deployment/backend -n devops --timeout=180s
+
+    - name: Display Kubernetes resources
+      command: kubectl get pods,services -n devops
+      register: resources
+
+    - name: Deployment result
+      debug:
+        var: resources.stdout_lines
